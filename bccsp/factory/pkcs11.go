@@ -26,6 +26,7 @@ type FactoryOpts struct {
 	Default string             `json:"default" yaml:"Default"`
 	SW      *SwOpts            `json:"SW,omitempty" yaml:"SW,omitempty"`
 	PKCS11  *pkcs11.PKCS11Opts `json:"PKCS11,omitempty" yaml:"PKCS11"`
+	PQC     *PQCOpts           `json:"PQC,omitempty" yaml:"PQC,omitempty"`
 }
 
 func initFactories(config *FactoryOpts) (res bccsp.BCCSP, err error) {
@@ -60,6 +61,18 @@ func initFactories(config *FactoryOpts) (res bccsp.BCCSP, err error) {
 		}
 	}
 
+	// PQC-Based BCCSP
+	if config.Default == "PQC" && config.PQC != nil {
+		f := newPQCFactory()
+		if f == nil {
+			return nil, errors.New("PQC BCCSP requires building with the pqc tag")
+		}
+		res, err = initBCCSP(f, config)
+		if err != nil {
+			return res, errors.Wrapf(err, "Failed initializing PQC.BCCSP")
+		}
+	}
+
 	if res == nil {
 		return res, errors.Errorf("Could not find default `%s` BCCSP", config.Default)
 	}
@@ -75,6 +88,11 @@ func GetBCCSPFromOpts(config *FactoryOpts) (bccsp.BCCSP, error) {
 		f = &SWFactory{}
 	case "PKCS11":
 		f = &PKCS11Factory{}
+	case "PQC":
+		f = newPQCFactory()
+		if f == nil {
+			return nil, errors.New("PQC BCCSP requires building with the pqc tag")
+		}
 	default:
 		return nil, errors.Errorf("Could not find BCCSP, no '%s' provider", config.Default)
 	}

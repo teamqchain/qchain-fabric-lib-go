@@ -9,6 +9,8 @@ package pqc
 import (
 	"bytes"
 	"testing"
+
+	"github.com/hyperledger/fabric-lib-go/bccsp"
 )
 
 func TestFileKeyStoreRoundTrip(t *testing.T) {
@@ -65,7 +67,7 @@ func TestMLDSA44SignVerifyRoundtrip(t *testing.T) {
 		t.Fatalf("keygen failed: %v", err)
 	}
 
-	digest, err := csp.Hash([]byte("this is a test message"), nil)
+	digest, err := csp.Hash([]byte("this is a test message"), &bccsp.SHA256Opts{})
 	if err != nil {
 		t.Fatalf("hash failed: %v", err)
 	}

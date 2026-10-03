@@ -19,6 +19,8 @@ import (
 	"crypto/mldsa"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/sha3"
+	"crypto/sha512"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/hex"
@@ -391,11 +393,37 @@ type hashOpts struct{}
 func (hashOpts) Algorithm() string     { return "SHA256" }
 func (hashOpts) HashFunc() crypto.Hash { return crypto.SHA256 }
 func HashOpts() bccsp.HashOpts         { return hashOpts{} }
-func (c *CSP) Hash(msg []byte, _ bccsp.HashOpts) ([]byte, error) {
-	sum := sha256.Sum256(msg)
-	return sum[:], nil
+
+// newHash returns the hash function selected by opts, as the SW BCCSP does.
+// The generic SHA option maps to SHA-256, the SW default (SHA2, level 256).
+func newHash(opts bccsp.HashOpts) (hash.Hash, error) {
+	if opts == nil {
+		return nil, errors.New("invalid opts: must not be nil")
+	}
+	switch opts.Algorithm() {
+	case bccsp.SHA256, bccsp.SHA:
+		return sha256.New(), nil
+	case bccsp.SHA384:
+		return sha512.New384(), nil
+	case bccsp.SHA3_256:
+		return sha3.New256(), nil
+	case bccsp.SHA3_384:
+		return sha3.New384(), nil
+	default:
+		return nil, fmt.Errorf("unsupported hash algorithm %q", opts.Algorithm())
+	}
 }
-func (c *CSP) GetHash(_ bccsp.HashOpts) (hash.Hash, error) { return sha256.New(), nil }
+
+func (c *CSP) Hash(msg []byte, opts bccsp.HashOpts) ([]byte, error) {
+	h, err := newHash(opts)
+	if err != nil {
+		return nil, err
+	}
+	h.Write(msg)
+	return h.Sum(nil), nil
+}
+
+func (c *CSP) GetHash(opts bccsp.HashOpts) (hash.Hash, error) { return newHash(opts) }
 
 func (c *CSP) Sign(k bccsp.Key, digest []byte, _ bccsp.SignerOpts) ([]byte, error) {
 	key, err := asPrivateKey(k)

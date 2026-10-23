@@ -500,12 +500,18 @@ func (c *CSP) Verify(k bccsp.Key, signature, digest []byte, _ bccsp.SignerOpts) 
 	if !signatureAlgorithms[key.algorithm] {
 		return false, errors.New("key is not an ML-DSA verification key")
 	}
-	sig := oqs.Signature{}
-	if err := sig.Init(key.algorithm, nil); err != nil {
+	params, err := mldsaParameters(key.algorithm)
+	if err != nil {
 		return false, err
 	}
-	defer sig.Clean()
-	return sig.Verify(digest, signature, key.public)
+	pub, err := mldsa.NewPublicKey(params, key.public)
+	if err != nil {
+		return false, fmt.Errorf("invalid %s public key: %w", key.algorithm, err)
+	}
+	// Verify the bytes exactly as Sign signs them: directly, with an empty
+	// context (the MSP passes SHA-256(msg)). With a valid public key, any
+	// mldsa.Verify error means the signature does not verify.
+	return mldsa.Verify(pub, digest, signature, nil) == nil, nil
 }
 
 func (c *CSP) Encapsulate(k bccsp.Key) ([]byte, []byte, error) {

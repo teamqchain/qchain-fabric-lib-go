@@ -321,7 +321,11 @@ func (c *CSP) KeyImport(raw interface{}, opts bccsp.KeyImportOpts) (bccsp.Key, e
 			imported = &key{algorithm: algorithm, private: true, secret: append([]byte(nil), data...), public: append([]byte(nil), opts.PublicKey...)}
 		}
 	case *PublicKeyImportOpts:
-		imported = &key{algorithm: algorithm, public: append([]byte(nil), data...)}
+		public, err := publicKeyImportBytes(algorithm, data)
+		if err != nil {
+			return nil, err
+		}
+		imported = &key{algorithm: algorithm, public: public}
 	default:
 		return nil, errors.New("use PrivateKeyImportOpts or PublicKeyImportOpts")
 	}
@@ -338,6 +342,34 @@ func (c *CSP) KeyImport(raw interface{}, opts bccsp.KeyImportOpts) (bccsp.Key, e
 		}
 	}
 	return imported, nil
+}
+
+// publicKeyImportBytes returns the raw public key for a PublicKeyImportOpts
+// import. Raw bytes are used as given; an ML-DSA key may also be PKIX DER,
+// such as public Bytes() or a <ski>_pk file.
+func publicKeyImportBytes(algorithm string, data []byte) ([]byte, error) {
+	if !signatureAlgorithms[algorithm] {
+		return append([]byte(nil), data...), nil
+	}
+	params, err := mldsaParameters(algorithm)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == params.PublicKeySize() {
+		return append([]byte(nil), data...), nil
+	}
+	parsed, err := x509.ParsePKIXPublicKey(data)
+	if err != nil {
+		return nil, fmt.Errorf("%s public key is neither %d raw bytes nor PKIX DER: %w", algorithm, params.PublicKeySize(), err)
+	}
+	pub, ok := parsed.(*mldsa.PublicKey)
+	if !ok {
+		return nil, fmt.Errorf("PKIX public key is %T, not an ML-DSA key", parsed)
+	}
+	if pub.Parameters() != params {
+		return nil, fmt.Errorf("PKIX public key is %s, not %s", pub.Parameters(), algorithm)
+	}
+	return pub.Bytes(), nil
 }
 
 func validatePrivateKey(k *key) error {

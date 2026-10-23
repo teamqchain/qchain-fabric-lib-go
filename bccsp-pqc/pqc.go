@@ -658,8 +658,16 @@ func (s *FileKeyStore) storeMLDSAKey(k *key) error {
 	defer clear(data)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !k.private && s.holdsMLDSAPrivateKey(k.SKI()) {
-		return nil
+	if !k.private {
+		if s.holdsMLDSAPrivateKey(k.SKI()) {
+			return nil
+		}
+		// The private key may be under another file name, e.g. cryptogen's
+		// priv_sk; GetKey's scan would find it only after <ski>_pk.
+		if found, err := s.searchKeystoreForSKI(k.SKI()); err == nil {
+			clear(found.(*key).seed)
+			return nil
+		}
 	}
 	return os.WriteFile(filepath.Join(s.path, hex.EncodeToString(k.SKI())+suffix), data, 0o600)
 }

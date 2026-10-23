@@ -415,6 +415,68 @@ func TestKeystoreCertImportKeepsPrivateKey(t *testing.T) {
 	}
 }
 
+func writePrivSk(t *testing.T, dir string, sk *mldsa.PrivateKey) {
+	t.Helper()
+	der, err := x509.MarshalPKCS8PrivateKey(sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(der)
+	if err := os.WriteFile(filepath.Join(dir, "priv_sk"), pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A cert import must not write <ski>_pk next to a cryptogen-style priv_sk
+// for the same key: GetKey reads _pk before it scans for priv_sk.
+func TestKeystoreCertImportKeepsScannedPrivSk(t *testing.T) {
+	sk, _ := mldsa.GenerateKey(mldsa.MLDSA44())
+	priv, _ := newSeedKey(MLDSA44, sk.Bytes())
+	dir := t.TempDir()
+	writePrivSk(t, dir, sk)
+
+	csp, _ := NewWithFileKeyStore(dir, nil)
+	if _, err := csp.KeyImport(selfSignedCert(t, csp, priv), &bccsp.X509PublicKeyImportOpts{}); err != nil {
+		t.Fatalf("cert import: %v", err)
+	}
+	if got := dirNames(t, dir); len(got) != 1 || got[0] != "priv_sk" {
+		t.Fatalf("cert import wrote next to priv_sk: %v", got)
+	}
+	fresh, _ := NewWithFileKeyStore(dir, nil)
+	k, err := fresh.GetKey(priv.SKI())
+	if err != nil || !k.Private() {
+		t.Fatalf("priv_sk no longer found by SKI after cert import (err=%v)", err)
+	}
+	signAndVerify(t, fresh, k, priv.public, mldsa.MLDSA44())
+}
+
+// Without a matching private key the public key is still written, even if
+// the keystore holds a priv_sk for a different key.
+func TestKeystoreCertImportWritesPKWithoutPrivateKey(t *testing.T) {
+	sk, _ := mldsa.GenerateKey(mldsa.MLDSA44())
+	priv, _ := newSeedKey(MLDSA44, sk.Bytes())
+	unrelated, _ := mldsa.GenerateKey(mldsa.MLDSA44())
+	for name, setup := range map[string]func(string){
+		"empty keystore":    func(string) {},
+		"unrelated priv_sk": func(dir string) { writePrivSk(t, dir, unrelated) },
+	} {
+		dir := t.TempDir()
+		setup(dir)
+		csp, _ := NewWithFileKeyStore(dir, nil)
+		if _, err := csp.KeyImport(selfSignedCert(t, csp, priv), &bccsp.X509PublicKeyImportOpts{}); err != nil {
+			t.Fatalf("%s: cert import: %v", name, err)
+		}
+		pk := filepath.Join(dir, hex.EncodeToString(priv.SKI())+"_pk")
+		if typ := pemType(t, pk); typ != "PUBLIC KEY" {
+			t.Fatalf("%s: %s holds %q", name, filepath.Base(pk), typ)
+		}
+		got, err := csp.GetKey(priv.SKI())
+		if err != nil || got.Private() {
+			t.Fatalf("%s: stored public key does not reload (err=%v)", name, err)
+		}
+	}
+}
+
 // TestKeystoreFindsCryptogenPrivSk runs cryptogen into a temp dir, copies
 // each MSP keystore (keeping cryptogen's priv_sk file name) and loads the
 // signing key by the certificate's SKI. Set PQC_CRYPTOGEN to a cryptogen

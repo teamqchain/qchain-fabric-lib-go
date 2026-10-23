@@ -341,9 +341,11 @@ func validatePrivateKey(k *key) error {
 	if len(k.seed) > 0 {
 		return nil // already validated by mldsa.NewPrivateKey in newSeedKey
 	}
+	secret := secretCopy(k.secret)
+	defer clear(secret)
 	if signatureAlgorithms[k.algorithm] {
 		sig := oqs.Signature{}
-		if err := sig.Init(k.algorithm, k.secret); err != nil {
+		if err := sig.Init(k.algorithm, secret); err != nil {
 			return err
 		}
 		defer sig.Clean()
@@ -353,7 +355,7 @@ func validatePrivateKey(k *key) error {
 		return nil
 	}
 	kem := oqs.KeyEncapsulation{}
-	if err := kem.Init(k.algorithm, k.secret); err != nil {
+	if err := kem.Init(k.algorithm, secret); err != nil {
 		return err
 	}
 	defer kem.Clean()
@@ -445,8 +447,10 @@ func (c *CSP) Sign(k bccsp.Key, digest []byte, _ bccsp.SignerOpts) ([]byte, erro
 		// nil opts: sign the message directly with an empty context, as liboqs does.
 		return sk.Sign(nil, digest, nil)
 	}
+	secret := secretCopy(key.secret)
+	defer clear(secret)
 	sig := oqs.Signature{}
-	if err := sig.Init(key.algorithm, key.secret); err != nil {
+	if err := sig.Init(key.algorithm, secret); err != nil {
 		return nil, err
 	}
 	defer sig.Clean()
@@ -493,12 +497,21 @@ func (c *CSP) Decapsulate(k bccsp.Key, ciphertext []byte) ([]byte, error) {
 	if !kemAlgorithms[key.algorithm] {
 		return nil, errors.New("key is not an ML-KEM key")
 	}
+	secret := secretCopy(key.secret)
+	defer clear(secret)
 	kem := oqs.KeyEncapsulation{}
-	if err := kem.Init(key.algorithm, key.secret); err != nil {
+	if err := kem.Init(key.algorithm, secret); err != nil {
 		return nil, err
 	}
 	defer kem.Clean()
 	return kem.DecapSecret(ciphertext)
+}
+
+// secretCopy returns a copy of a secret key for liboqs. oqs Init keeps the
+// slice it is given and Clean wipes it, so liboqs must never see key.secret
+// itself. Callers clear the copy when done.
+func secretCopy(secret []byte) []byte {
+	return append([]byte(nil), secret...)
 }
 
 func (c *CSP) Encrypt(bccsp.Key, []byte, bccsp.EncrypterOpts) ([]byte, error) {

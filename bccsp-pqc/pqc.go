@@ -227,17 +227,20 @@ func (c *CSP) KeyGen(opts bccsp.KeyGenOpts) (bccsp.Key, error) {
 	return generated, nil
 }
 
+// generateSignatureKey creates an ML-DSA key with crypto/mldsa. The key is
+// held as its FIPS 204 seed, the same form cryptogen writes as PKCS#8.
 func generateSignatureKey(algorithm string) (bccsp.Key, error) {
-	sig := oqs.Signature{}
-	if err := sig.Init(algorithm, nil); err != nil {
-		return nil, err
-	}
-	defer sig.Clean()
-	public, err := sig.GenerateKeyPair()
+	params, err := mldsaParameters(algorithm)
 	if err != nil {
 		return nil, err
 	}
-	return &key{algorithm: algorithm, private: true, secret: append([]byte(nil), sig.ExportSecretKey()...), public: public}, nil
+	sk, err := mldsa.GenerateKey(params)
+	if err != nil {
+		return nil, err
+	}
+	seed := sk.Bytes()
+	defer clear(seed)
+	return newSeedKey(algorithm, seed)
 }
 
 func generateKEMKey(algorithm string) (bccsp.Key, error) {

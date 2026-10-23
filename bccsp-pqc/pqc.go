@@ -4,11 +4,11 @@ Copyright IBM Corp. All Rights Reserved.
 SPDX-License-Identifier: Apache-2.0
 */
 
-// Package pqc provides a BCCSP implementation backed by liboqs-go.
+// Package pqc provides a post-quantum BCCSP implementation.
 //
-// The signature implementation supports the standardized ML-DSA-44,
-// ML-DSA-65, and ML-DSA-87 algorithms. The KEM implementation supports the
-// standardized ML-KEM-512, ML-KEM-768, and ML-KEM-1024 algorithms.
+// ML-DSA-44, ML-DSA-65 and ML-DSA-87 signatures use Go's crypto/mldsa.
+// ML-KEM-512, ML-KEM-768 and ML-KEM-1024 key encapsulation use liboqs-go,
+// which also handles legacy seedless ML-DSA keys.
 package pqc
 
 import (
@@ -480,7 +480,7 @@ func (c *CSP) Sign(k bccsp.Key, digest []byte, _ bccsp.SignerOpts) ([]byte, erro
 		if err != nil {
 			return nil, err
 		}
-		// nil opts: sign the message directly with an empty context, as liboqs does.
+		// nil opts: sign the given bytes directly with an empty context, as Verify checks them.
 		return sk.Sign(nil, digest, nil)
 	}
 	// Legacy seedless ML-DSA keys only: crypto/mldsa cannot sign with an

@@ -1,24 +1,24 @@
 # fabric-lib-go BCCSP PQC
 
-This module provides a separate BCCSP implementation backed by
-[liboqs-go](https://github.com/open-quantum-safe/liboqs-go). It supports the
-standardized ML-DSA signature algorithms and ML-KEM key encapsulation
-algorithms exposed by liboqs 0.16.
+Package `bccsp-pqc` provides a post-quantum BCCSP implementation. ML-DSA-44,
+ML-DSA-65 and ML-DSA-87 signatures use Go's `crypto/mldsa`. ML-KEM-512,
+ML-KEM-768 and ML-KEM-1024 key encapsulation use
+[liboqs-go](https://github.com/open-quantum-safe/liboqs-go) (liboqs 0.16),
+which also handles legacy seedless ML-DSA keys.
 
 ## Native prerequisites
 
 liboqs-go is a cgo binding. Install liboqs, a C compiler, `pkg-config`, and
-the liboqs-go pkg-config file before building this module. The upstream
+the liboqs-go pkg-config file before building this package. The upstream
 installation instructions are available in the liboqs-go repository.
 
 ```sh
 export PKG_CONFIG_PATH=/path/to/liboqs-go/.config
-go test ./...
+go test ./bccsp-pqc/
 ```
 
-The module uses `replace github.com/hyperledger/fabric-lib-go => ..` for local
-development. Remove that replace directive and use a published parent module
-version when consuming this package externally.
+The package is part of the `github.com/hyperledger/fabric-lib-go` module and
+has no `go.mod` of its own.
 
 ## API notes
 
@@ -27,15 +27,16 @@ available through `KeyGen`, `Sign`, and `Verify`. ML-KEM is exposed through the
 additional `KEM` interface because KEM encapsulation returns both ciphertext
 and a shared secret; it is not conventional public-key encryption.
 
-The existing Fabric `bccsp/signer` helper parses public keys with Go's
-`x509.ParsePKIXPublicKey`. Go and standard Fabric X.509 profiles do not yet
-provide ML-DSA/ML-KEM certificate support, so this module supplies raw PQC
-key bytes and BCCSP operations but does not claim drop-in compatibility with
-an existing ECDSA-based Fabric MSP certificate profile.
+Go 1.27's `crypto/x509` parses and creates ML-DSA certificates, CSRs and
+PKIX public keys, so the Fabric `bccsp/signer` helper gives a `crypto.Signer`
+over this CSP that can issue them. An MSP accepts ML-DSA certificates only if
+it allows the ML-DSA public-key algorithm, which upstream Fabric does not.
+ML-KEM keys have no certificate role.
 
 Private-key imports require the matching public key in
-`PrivateKeyImportOpts.PublicKey`, because liboqs does not expose a public-key
-derivation operation from an exported secret key.
+`PrivateKeyImportOpts.PublicKey`. For a seed, it must equal the public key
+derived from the seed. A legacy expanded liboqs secret has no seed to derive
+it from, so the given public key is used as is.
 
 ## Use of liboqs
 
@@ -67,4 +68,5 @@ the PEM file is not encrypted; ML-DSA public keys are written to `<ski>_pk`
 unencrypted either way. Storing an ML-DSA private key that has no seed (an
 expanded liboqs secret) also fails; import such keys with `Temporary: true`
 to keep them in memory only. A public key is not written when its private key
-is already stored as `<ski>_sk` or as a legacy `<ski>.pqc`.
+is already in the keystore, as `<ski>_sk`, as a legacy `<ski>.pqc`, or under
+another file name found by the scan (such as `priv_sk`).

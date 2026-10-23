@@ -8,6 +8,7 @@ package pqc
 
 import (
 	"bytes"
+	"crypto/mldsa"
 	"testing"
 
 	"github.com/hyperledger/fabric-lib-go/bccsp"
@@ -15,15 +16,17 @@ import (
 
 func TestFileKeyStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	store, err := NewFileKeyStore(dir, []byte("test-password"))
+	store, err := NewFileKeyStore(dir, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := &key{
-		algorithm: MLDSA44,
-		private:   true,
-		secret:    []byte("private-key-material"),
-		public:    []byte("public-key-material"),
+	sk, err := mldsa.GenerateKey(mldsa.MLDSA44())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := newSeedKey(MLDSA44, sk.Bytes())
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := store.StoreKey(want); err != nil {
 		t.Fatal(err)
@@ -36,7 +39,7 @@ func TestFileKeyStoreRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("unexpected key type %T", got)
 	}
-	if value.algorithm != want.algorithm || value.private != want.private || !bytes.Equal(value.secret, want.secret) || !bytes.Equal(value.public, want.public) {
+	if value.algorithm != want.algorithm || value.private != want.private || len(value.secret) != 0 || !bytes.Equal(value.seed, want.seed) || !bytes.Equal(value.public, want.public) {
 		t.Fatalf("round trip changed key material")
 	}
 }

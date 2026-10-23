@@ -21,7 +21,8 @@ import (
 
 const repeat = 25
 
-func TestSignRepeatedlyWithOneKey(t *testing.T) {
+// The liboqs signing regression is covered by TestImportedLiboqsSecretSignsRepeatedly.
+func TestSeedKeySignsRepeatedly(t *testing.T) {
 	csp, err := NewWithFileKeyStore(t.TempDir(), nil)
 	if err != nil {
 		t.Fatal(err)

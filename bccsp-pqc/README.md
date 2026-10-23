@@ -36,3 +36,27 @@ an existing ECDSA-based Fabric MSP certificate profile.
 Private-key imports require the matching public key in
 `PrivateKeyImportOpts.PublicKey`, because liboqs does not expose a public-key
 derivation operation from an exported secret key.
+
+## Keystore
+
+`FileKeyStore` names files by SKI (hex of SHA-256 over the raw public key):
+
+| Key | File | Format |
+|---|---|---|
+| ML-DSA private | `<ski>_sk` | PEM `PRIVATE KEY`, PKCS#8 holding the FIPS 204 seed (same as cryptogen) |
+| ML-DSA public | `<ski>_pk` | PEM `PUBLIC KEY`, PKIX |
+| ML-KEM private or public | `<ski>.pqc` | JSON, AES-GCM encrypted when a password is set |
+
+ML-KEM keys stay in `.pqc` because Go's PKCS#8 has no ML-KEM encoding.
+
+`GetKey` looks up `<ski>_sk`, then `<ski>_pk`, then `<ski>.pqc`, and finally
+scans the directory for a PKCS#8 ML-DSA private key under any file name, such
+as cryptogen's `priv_sk`. `.pqc` files written for ML-DSA keys by earlier
+versions still load, but ML-DSA keys are never written in that format.
+
+Storing an ML-DSA private key fails when the keystore has a password, because
+the PEM file is not encrypted; ML-DSA public keys are written to `<ski>_pk`
+unencrypted either way. Storing an ML-DSA private key that has no seed (an
+expanded liboqs secret) also fails; import such keys with `Temporary: true`
+to keep them in memory only. A public key is not written when its private key
+is already stored as `<ski>_sk` or as a legacy `<ski>.pqc`.

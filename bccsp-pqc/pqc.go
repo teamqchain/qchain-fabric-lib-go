@@ -379,6 +379,8 @@ func validatePrivateKey(k *key) error {
 	secret := secretCopy(k.secret)
 	defer clear(secret)
 	if signatureAlgorithms[k.algorithm] {
+		// Legacy seedless ML-DSA keys only: an expanded liboqs secret can be
+		// checked by liboqs, not by crypto/mldsa.
 		sig := oqs.Signature{}
 		if err := sig.Init(k.algorithm, secret); err != nil {
 			return err
@@ -402,13 +404,12 @@ func validatePrivateKey(k *key) error {
 
 func validatePublicKey(k *key) error {
 	if signatureAlgorithms[k.algorithm] {
-		sig := oqs.Signature{}
-		if err := sig.Init(k.algorithm, nil); err != nil {
+		params, err := mldsaParameters(k.algorithm)
+		if err != nil {
 			return err
 		}
-		defer sig.Clean()
-		if len(k.public) != sig.Details().LengthPublicKey {
-			return errors.New("invalid ML-DSA public-key length")
+		if _, err := mldsa.NewPublicKey(params, k.public); err != nil {
+			return fmt.Errorf("invalid %s public key: %w", k.algorithm, err)
 		}
 		return nil
 	}
@@ -482,6 +483,8 @@ func (c *CSP) Sign(k bccsp.Key, digest []byte, _ bccsp.SignerOpts) ([]byte, erro
 		// nil opts: sign the message directly with an empty context, as liboqs does.
 		return sk.Sign(nil, digest, nil)
 	}
+	// Legacy seedless ML-DSA keys only: crypto/mldsa cannot sign with an
+	// expanded liboqs secret, so liboqs does.
 	secret := secretCopy(key.secret)
 	defer clear(secret)
 	sig := oqs.Signature{}

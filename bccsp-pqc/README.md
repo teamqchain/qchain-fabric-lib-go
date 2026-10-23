@@ -37,6 +37,14 @@ Private-key imports require the matching public key in
 `PrivateKeyImportOpts.PublicKey`, because liboqs does not expose a public-key
 derivation operation from an exported secret key.
 
+## Use of liboqs
+
+ML-DSA keys are generated, stored, signed with and verified using Go's
+`crypto/mldsa`. liboqs is used for ML-KEM and for legacy seedless ML-DSA keys
+only: an imported expanded liboqs secret, or one in a `.pqc` file from an
+earlier version, has no seed, so liboqs validates it at import and signs with
+it.
+
 ## Keystore
 
 `FileKeyStore` names files by SKI (hex of SHA-256 over the raw public key):

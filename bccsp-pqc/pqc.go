@@ -33,6 +33,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 
 	"github.com/hyperledger/fabric-lib-go/bccsp"
 	"github.com/open-quantum-safe/liboqs-go/oqs"
@@ -83,6 +84,19 @@ type key struct {
 	// seed is set for ML-DSA keys imported from a crypto/mldsa (FIPS 204)
 	// 32-byte seed. Such keys sign via crypto/mldsa; secret is unused.
 	seed []byte
+	// expanded caches the crypto/mldsa key for seed, so Sign does not rebuild
+	// it from the seed on every call. It is set where an expanded key already
+	// exists, otherwise on first use (mldsaKey). It is never stored: the
+	// keystore keeps only the seed.
+	expanded atomic.Pointer[mldsa.PrivateKey]
+}
+
+// newMLDSAKey builds an ML-DSA private key from an expanded crypto/mldsa key,
+// keeping its seed and public key and caching the expanded key.
+func newMLDSAKey(algorithm string, sk *mldsa.PrivateKey) *key {
+	k := &key{algorithm: algorithm, private: true, seed: sk.Bytes(), public: sk.PublicKey().Bytes()}
+	k.expanded.Store(sk)
+	return k
 }
 
 // newSeedKey builds an ML-DSA private key from a crypto/mldsa seed. The
@@ -96,7 +110,26 @@ func newSeedKey(algorithm string, seed []byte) (*key, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid ML-DSA seed: %w", err)
 	}
-	return &key{algorithm: algorithm, private: true, seed: append([]byte(nil), seed...), public: sk.PublicKey().Bytes()}, nil
+	return newMLDSAKey(algorithm, sk), nil
+}
+
+// mldsaKey returns the expanded crypto/mldsa key of a seed key, expanding
+// the seed once if no expanded key is cached yet. Concurrent first calls may
+// each expand the seed; one result is kept.
+func (k *key) mldsaKey() (*mldsa.PrivateKey, error) {
+	if sk := k.expanded.Load(); sk != nil {
+		return sk, nil
+	}
+	params, err := mldsaParameters(k.algorithm)
+	if err != nil {
+		return nil, err
+	}
+	sk, err := mldsa.NewPrivateKey(params, k.seed)
+	if err != nil {
+		return nil, err
+	}
+	k.expanded.CompareAndSwap(nil, sk)
+	return k.expanded.Load(), nil
 }
 
 // mldsaAlgorithm maps a raw ML-DSA public key to its algorithm name.
@@ -238,9 +271,7 @@ func generateSignatureKey(algorithm string) (bccsp.Key, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed := sk.Bytes()
-	defer clear(seed)
-	return newSeedKey(algorithm, seed)
+	return newMLDSAKey(algorithm, sk), nil
 }
 
 func generateKEMKey(algorithm string) (bccsp.Key, error) {
@@ -472,11 +503,7 @@ func (c *CSP) Sign(k bccsp.Key, digest []byte, _ bccsp.SignerOpts) ([]byte, erro
 		return nil, errors.New("key is not an ML-DSA signing key")
 	}
 	if len(key.seed) > 0 {
-		params, err := mldsaParameters(key.algorithm)
-		if err != nil {
-			return nil, err
-		}
-		sk, err := mldsa.NewPrivateKey(params, key.seed)
+		sk, err := key.mldsaKey()
 		if err != nil {
 			return nil, err
 		}
@@ -642,7 +669,7 @@ func (s *FileKeyStore) storeMLDSAKey(k *key) error {
 		if len(k.seed) == 0 {
 			return fmt.Errorf("cannot store %s private key without its seed: PKCS#8 holds only the FIPS 204 seed, so import an expanded liboqs secret as Temporary", k.algorithm)
 		}
-		sk, err := mldsa.NewPrivateKey(params, k.seed)
+		sk, err := k.mldsaKey()
 		if err != nil {
 			return err
 		}
@@ -766,9 +793,7 @@ func parseMLDSAPrivatePEM(data []byte) (*key, error) {
 	if err != nil {
 		return nil, err
 	}
-	seed := sk.Bytes()
-	defer clear(seed)
-	return newSeedKey(algorithm, seed)
+	return newMLDSAKey(algorithm, sk), nil
 }
 
 func parseMLDSAPublicPEM(data []byte) (*key, error) {
@@ -819,15 +844,16 @@ func (s *FileKeyStore) searchKeystoreForSKI(ski []byte) (bccsp.Key, error) {
 		if !ok {
 			continue
 		}
-		algorithm, err := mldsaAlgorithm(sk.PublicKey().Bytes())
+		pub := sk.PublicKey().Bytes()
+		algorithm, err := mldsaAlgorithm(pub)
 		if err != nil {
 			continue
 		}
-		found, err := newSeedKey(algorithm, sk.Bytes())
-		if err != nil || !bytes.Equal(found.SKI(), ski) {
+		// Compare SKIs before building a key, so other files' keys are not copied.
+		if sum := sha256.Sum256(pub); !bytes.Equal(sum[:], ski) {
 			continue
 		}
-		return found, nil
+		return newMLDSAKey(algorithm, sk), nil
 	}
 	return nil, fmt.Errorf("key with SKI %x not found in %s", ski, s.path)
 }

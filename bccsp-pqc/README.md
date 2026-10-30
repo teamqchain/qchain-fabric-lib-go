@@ -38,6 +38,11 @@ Private-key imports require the matching public key in
 derived from the seed. A legacy expanded liboqs secret has no seed to derive
 it from, so the given public key is used as is.
 
+An ML-DSA seed key keeps its expanded `crypto/mldsa` private key (about
+197 KB for ML-DSA-44) for as long as the key object lives, so `Sign` does not
+rebuild it from the seed on every call. Go's `mldsa.PrivateKey` cannot be
+zeroed, so only the seed copies this package makes are cleared.
+
 ## Use of liboqs
 
 ML-DSA keys are generated, stored, signed with and verified using Go's
